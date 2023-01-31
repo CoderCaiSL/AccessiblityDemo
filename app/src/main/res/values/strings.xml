@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">AccessiblityDemo</string>
+    <string name="noti_action_pause">Pause</string>
+    <string name="noti_action_resume">Resume</string>
+    <string name="noti_action_stop">Stop</string>
+    <string name="is_running">正在运行</string>
+    <string name="touch_to_open">点击关闭</string>
+    <string name="dialog_enable_accessibility_msg">打开我的 \"辅助功能\" 后才能用哦.</string>
+    <string name="dialog_enable_accessibility_positive_btn">去设置</string>
+    <string name="accessibility_name">脚本执行服务</string>
+    <string name="service_description">\"脚本执行\"是基于安卓系统的无障碍服务来实现脚本功能的，为了保证程序能正常工作，打开此服务。\n\n本作者良心发誓不会收集或上传任何个人信息，请放心使用！\n(若启动后无任何反应请关掉开关重新启动一次)</string>
+</resources>
