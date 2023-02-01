@@ -124,7 +124,7 @@
             android:layout_margin="1dp"
             android:layout_weight="1"
             android:padding="0dp"
-            android:text="检查窗口"
+            android:text="开始脚本"
             android:textSize="10sp" />
         <Button
             android:id="@+id/button_add_position"

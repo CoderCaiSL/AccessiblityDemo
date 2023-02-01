@@ -19,12 +19,8 @@ import android.content.*
 import android.content.pm.PackageManager
 import android.graphics.Path
 import android.graphics.Rect
-import android.os.Handler
-import android.os.Looper
 import android.provider.Settings
-import android.util.Log
 import android.view.inputmethod.InputMethodManager
-import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -129,12 +125,13 @@ open class BaseAccessibilityService :AccessibilityService() , CoroutineScope by 
                             event.packageName.toString(),
                             event.className.toString()
                         )
-                        try {
-                            var activityName = packageManager.getActivityInfo(componentName, 0).toString()
-                            tmpActivityName = activityName.substring(activityName.indexOf(" "),activityName.indexOf("}"))
-                        }catch (e:Exception){
-                            logE(TAG,e.message.toString(),e)
-                        }
+                        logD(TAG, "类名：$tmpActivityName")
+//                        try {
+//                            var activityName = packageManager.getActivityInfo(componentName, 0).toString()
+//                            tmpActivityName = activityName.substring(activityName.indexOf(" "),activityName.indexOf("}"))
+//                        }catch (e:Exception){
+//                            logE(TAG,e.message.toString(),e)
+//                        }
                         AccessibilityUtil.instant.updateActivityAndPgName(tmpPkgName.toString(),tmpActivityName)
 //                        AccessibilityUtil.instant.tmpPkgName = tmpPkgName.toString()
 //                        AccessibilityUtil.instant.tmpClassName = tmpClassName.toString()

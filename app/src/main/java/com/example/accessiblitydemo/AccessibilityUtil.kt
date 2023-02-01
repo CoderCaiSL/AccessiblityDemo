@@ -4,8 +4,6 @@ import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.app.Application
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.Rect
@@ -14,6 +12,9 @@ import android.view.*
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.*
 import java.lang.ref.WeakReference
+import java.util.*
+import kotlin.collections.HashMap
+import kotlin.concurrent.timerTask
 
 /**
  * @author: CaiSongL
@@ -21,6 +22,11 @@ import java.lang.ref.WeakReference
  */
 class AccessibilityUtil private constructor(){
 
+    private lateinit var viewTarget: View
+    private lateinit var windowManager: WindowManager
+    private lateinit var tvWidgetInfo: TextView
+    private lateinit var layoutOverlayOutline: FrameLayout
+    private lateinit var btAddWidget: Button
     private var tvActivityName: TextView ?=null
     private var tvPackageName: TextView ?= null
     private val TAG = "布局检测器"
@@ -29,6 +35,17 @@ class AccessibilityUtil private constructor(){
     var weakService : WeakReference<BaseAccessibilityService> ?= null
     var isRunJin10VideoJB  = false
     var isRunTest = false;
+    private var nodeListMap : HashMap<AccessibilityNodeInfo,List<AccessibilityNodeInfo>> = HashMap()
+    private var nodeMapImageView : HashMap<String,ImageView> = HashMap()
+    // define view positions
+    lateinit var customizationParams: WindowManager.LayoutParams
+    lateinit var outlineParams: WindowManager.LayoutParams
+    lateinit var targetParams: WindowManager.LayoutParams
+    var clickHashMap : HashMap<String,MutableList<AccessibilityData>> = HashMap()
+    private var usdTouch = false
+    private var isRunning = false;
+    private val mTimer = Timer() // 计时器
+
 
     init {
     }
@@ -52,7 +69,7 @@ class AccessibilityUtil private constructor(){
             return
         }
         // show activity customization window
-        val windowManager = weakService?.get()?.getSystemService(AccessibilityService.WINDOW_SERVICE) as WindowManager
+        windowManager = weakService?.get()?.getSystemService(AccessibilityService.WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
         windowManager.defaultDisplay.getRealMetrics(metrics)
         val b = metrics.heightPixels > metrics.widthPixels
@@ -63,23 +80,19 @@ class AccessibilityUtil private constructor(){
         val viewCustomization: View = inflater.inflate(R.layout.layout_activity_customization, null)
         tvPackageName = viewCustomization.findViewById<TextView>(R.id.tv_package_name)
         tvActivityName = viewCustomization.findViewById<TextView>(R.id.tv_activity_name)
-        val tvWidgetInfo = viewCustomization.findViewById<TextView>(R.id.tv_widget_info)
+        tvWidgetInfo = viewCustomization.findViewById<TextView>(R.id.tv_widget_info)
         val tvPositionInfo = viewCustomization.findViewById<TextView>(R.id.tv_position_info)
         val btShowOutline = viewCustomization.findViewById<Button>(R.id.button_show_outline)
-        val btAddWidget = viewCustomization.findViewById<Button>(R.id.button_add_widget)
+        btAddWidget = viewCustomization.findViewById<Button>(R.id.button_add_widget)
         val btShowTarget = viewCustomization.findViewById<Button>(R.id.button_show_target)
         val btAddPosition = viewCustomization.findViewById<Button>(R.id.button_add_position)
         val btDumpScreen = viewCustomization.findViewById<Button>(R.id.button_dump_screen)
         val btQuit = viewCustomization.findViewById<Button>(R.id.button_quit)
-        val viewTarget: View = inflater.inflate(R.layout.layout_accessibility_node_desc, null)
-        val layoutOverlayOutline = viewTarget.findViewById<FrameLayout>(R.id.frame)
+        viewTarget = inflater.inflate(R.layout.layout_accessibility_node_desc, null)
+        layoutOverlayOutline = viewTarget.findViewById<FrameLayout>(R.id.frame)
         val imageTarget = ImageView(weakService?.get())
         imageTarget.setImageResource(R.drawable.ic_target)
 
-        // define view positions
-        val customizationParams: WindowManager.LayoutParams
-        val outlineParams: WindowManager.LayoutParams
-        val targetParams: WindowManager.LayoutParams
         customizationParams = WindowManager.LayoutParams()
         customizationParams.type = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
         customizationParams.format = PixelFormat.TRANSPARENT
@@ -98,7 +111,10 @@ class AccessibilityUtil private constructor(){
         outlineParams.width = metrics.widthPixels
         outlineParams.height = metrics.heightPixels
         outlineParams.flags =
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         outlineParams.alpha = 0f
         targetParams = WindowManager.LayoutParams()
         targetParams.type = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
@@ -161,12 +177,13 @@ class AccessibilityUtil private constructor(){
                         windowManager.updateViewLayout(imageTarget, targetParams)
                     }
                 }
-                return true
+                return false
             }
         })
         btShowOutline.setOnClickListener(View.OnClickListener { v ->
             val button = v as Button
             if (outlineParams.alpha == 0f) {
+                usdTouch = true
                 val root: AccessibilityNodeInfo =
                     weakService?.get()?.rootInActiveWindow ?: return@OnClickListener
                 layoutOverlayOutline.removeAllViews()
@@ -181,9 +198,13 @@ class AccessibilityUtil private constructor(){
                     o2.getBoundsInScreen(rectB)
                     rectB.width() * rectB.height() - rectA.width() * rectA.height()
                 })
+                nodeMapImageView.clear()
                 for (e in nodeList) {
                     val temRect = Rect()
                     e.getBoundsInScreen(temRect)
+                    if (!e.isClickable){
+                        continue
+                    }
                     val params = FrameLayout.LayoutParams(temRect.width(), temRect.height())
                     params.leftMargin = temRect.left
                     params.topMargin = temRect.top
@@ -192,58 +213,39 @@ class AccessibilityUtil private constructor(){
                     }
                     val img = ImageView(weakService?.get())
                     img.setBackgroundResource(R.drawable.node)
-                    img.isFocusableInTouchMode = true
-                    img.setOnClickListener { v -> v.requestFocus() }
-                    img.onFocusChangeListener = View.OnFocusChangeListener { v, hasFocus ->
-                        if (hasFocus) {
-                            val classCheck = Class.forName(e.className.toString())
-                            try {
-                                var tmp = classCheck.getDeclaredConstructor().newInstance() as SeekBar
-                                logD("测试进度条",tmp?.progress.toString()+"/")
-                            }catch (e:Exception){
-
-                            }
-                            val fields = classCheck.fields
-                            try {
-                                for (tmp in fields){
-                                    tmp.isAccessible = true
-                                    logD("测试",tmp.name+"/"+tmp.get(null)+"//"+classCheck.getField("text"))
-                                }
-                            }catch (e:Exception){
-                                logD("测试",e.message.toString())
-                            }
-                            val cId: CharSequence? = e.viewIdResourceName
-                            val cDesc = e.contentDescription
-                            val cText = e.text
-                            btAddWidget.isEnabled = true
-                            tvPackageName!!.text = tmpPkgName+"("+e.className+")"
-                            tvActivityName!!.text = tmpActivityName
-                            tvWidgetInfo.text =
-                                "click:" + (if (e.isClickable) "true" else "false") + " " + "bonus:" + temRect.toShortString() + " " + "id:" +
-                                        (cId?.toString()
-                                    ?: "null") + " " + "desc:" + (cDesc?.toString()
-                                    ?: "null") + " " + "text:" + (cText?.toString() ?: "null")
-                            if (e.isClickable){
-                                e.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                            }
-                            v.setBackgroundResource(R.drawable.node_focus)
-                        } else {
-                            v.setBackgroundResource(R.drawable.node)
-                        }
-                    }
+//                    img.isFocusableInTouchMode = true
+//                    img.setOnClickListener { v -> v.requestFocus() }
+//                    img.onFocusChangeListener = View.OnFocusChangeListener { v, hasFocus ->
+//                        if (hasFocus) {
+//                            val cId: CharSequence? = e.viewIdResourceName
+//                            val cDesc = e.contentDescription
+//                            val cText = e.text
+//                            btAddWidget.isEnabled = true
+//                            tvPackageName!!.text = tmpPkgName+"("+e.className+")"
+//                            tvActivityName!!.text = tmpActivityName
+//                            tvWidgetInfo.text =
+//                                "click:" + (if (e.isClickable) "true" else "false") + " " + "bonus:" + temRect.toShortString() + " " + "id:" +
+//                                        (cId?.toString()
+//                                    ?: "null") + " " + "desc:" + (cDesc?.toString()
+//                                    ?: "null") + " " + "text:" + (cText?.toString() ?: "null")
+//                            if (e.isClickable){
+//                                e.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+//                            }
+//                            v.setBackgroundResource(R.drawable.node_focus)
+//                        } else {
+//                            v.setBackgroundResource(R.drawable.node)
+//                        }
+//                    }
                     layoutOverlayOutline.addView(img, params)
                 }
                 outlineParams.alpha = 0.5f
-                outlineParams.flags =
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 windowManager.updateViewLayout(viewTarget, outlineParams)
                 tvPackageName!!.setText(tmpPkgName)
                 tvActivityName!!.setText(tmpActivityName)
                 button.text = "隐藏布局"
             } else {
+                usdTouch = false
                 outlineParams.alpha = 0f
-                outlineParams.flags =
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                 windowManager.updateViewLayout(viewTarget, outlineParams)
                 btAddWidget.isEnabled = false
                 button.text = "更新布局"
@@ -289,13 +291,25 @@ class AccessibilityUtil private constructor(){
             tvPackageName!!.text = "数据已清除，请重新进行添加"
         }
         btDumpScreen.setOnClickListener(View.OnClickListener {
-            val root: AccessibilityNodeInfo =
-                weakService?.get()?.rootInActiveWindow ?: return@OnClickListener
-            val result: String = dumpRootNode(root)
-            logD(TAG,result)
-            val clipboard = weakService?.get()?.getSystemService(AccessibilityService.CLIPBOARD_SERVICE) as ClipboardManager
-            val clip = ClipData.newPlainText("ACTIVITY", result)
-            clipboard.setPrimaryClip(clip)
+            isRunning = !isRunning
+            if (isRunning){
+                mTimer.schedule(timerTask {
+                    MainThreadHandler.runOnUiThread {
+                        updateNodeListView()
+                    }
+                },0,1500)
+                btDumpScreen.text = "停止脚本"
+            }else{
+                mTimer.cancel()
+                btDumpScreen.text = "开始脚本"
+            }
+//            val root: AccessibilityNodeInfo =
+//                weakService?.get()?.rootInActiveWindow ?: return@OnClickListener
+//            val result: String = dumpRootNode(root)
+//            logD(TAG,result)
+//            val clipboard = weakService?.get()?.getSystemService(AccessibilityService.CLIPBOARD_SERVICE) as ClipboardManager
+//            val clip = ClipData.newPlainText("ACTIVITY", result)
+//            clipboard.setPrimaryClip(clip)
 //            "窗口控件已复制到剪贴板！".showToast()
         })
         btQuit.setOnClickListener {
@@ -317,18 +331,132 @@ class AccessibilityUtil private constructor(){
         windowManager.addView(imageTarget, targetParams)
     }
 
+    fun runAction(nodeInfo: AccessibilityNodeInfo):Boolean{
+        if (nodeInfo.isClickable && nodeInfo.isVisibleToUser){
+           return nodeInfo.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }else{
+            return false
+        }
+    }
+
+
+    /**
+     * 视图变动的时候更新一次UI脚本，防止脚本获取控件的信息延迟导致脚本执行异常
+     */
+    @Synchronized
+    fun updateNodeListView(){
+        val root: AccessibilityNodeInfo =
+            weakService?.get()?.rootInActiveWindow ?: return
+        val roots = ArrayList<AccessibilityNodeInfo>()
+        layoutOverlayOutline.removeAllViews()
+        roots.add(root)
+        val nodeList = ArrayList<AccessibilityNodeInfo>()
+        findAllNode(roots, nodeList, "")
+        nodeList.sortWith(Comparator { o1, o2 ->
+            val rectA = Rect()
+            val rectB = Rect()
+            o1.getBoundsInScreen(rectA)
+            o2.getBoundsInScreen(rectB)
+            rectB.width() * rectB.height() - rectA.width() * rectA.height()
+        })
+        nodeMapImageView.clear()
+        usdTouch = false
+        var pageClickNodeInfoList : MutableList<AccessibilityData>? = clickHashMap[tmpActivityName]
+        if (pageClickNodeInfoList == null){
+            pageClickNodeInfoList = mutableListOf()
+        }
+        for (e in nodeList) {
+            val temRect = Rect()
+            if (!e.isVisibleToUser){
+                continue
+            }
+            if (!e.isClickable){
+                continue
+            }
+            e.getBoundsInScreen(temRect)
+            val params = FrameLayout.LayoutParams(temRect.width(), temRect.height())
+            params.leftMargin = temRect.left
+            params.topMargin = temRect.top
+            if (!e.contentDescription.isNullOrEmpty()){
+                logE("测试界面爬取up",e.contentDescription.toString()!!)
+            }
+            val img = ImageView(weakService?.get())
+            img.isFocusableInTouchMode = true
+            img.setOnClickListener { v -> v.requestFocus() }
+            val cId: CharSequence? = e.viewIdResourceName
+            val cDesc = e.contentDescription
+            val cText = e.text
+            val info = "click:" + (if (e.isClickable) "true" else "false") + " " + "bonus:" + temRect.toShortString() + " " + "id:" +
+                    (cId?.toString()
+                        ?: "null") + " " + "desc:" + (cDesc?.toString()
+                ?: "null") + " " + "text:" + (cText?.toString() ?: "null")
+            nodeMapImageView[info] = img
+            logD("脚本执行日志:","$info")
+            val tmpData = AccessibilityData(info,false,tmpActivityName,e)
+            var tp = hasInData(pageClickNodeInfoList,tmpData)
+            if (tp == null){
+                pageClickNodeInfoList.add(tmpData)
+                tp = tmpData
+            }
+            if (!tp.state){
+                img.setBackgroundResource(R.drawable.node_focus)
+            }else{
+                img.setBackgroundResource(R.drawable.node)
+            }
+            img.onFocusChangeListener = View.OnFocusChangeListener { v, hasFocus ->
+                if (hasFocus) {
+
+                    v.setBackgroundResource(R.drawable.node_focus)
+                } else {
+                    v.setBackgroundResource(R.drawable.node)
+                }
+            }
+            layoutOverlayOutline.addView(img, params)
+
+        }
+        if (isRunning){
+            if("com.jin10" != tmpPkgName){
+                WatchingAccessibilityService.sInstance!!.performGlobalAction(
+                    AccessibilityService.GLOBAL_ACTION_BACK)
+                return
+            }
+            var noRun = false
+            for (tmp in pageClickNodeInfoList){
+
+            }
+            if (!noRun){
+                WatchingAccessibilityService.sInstance!!.performGlobalAction(
+                    AccessibilityService.GLOBAL_ACTION_BACK)
+                updateNodeListView()
+            }
+        }
+        outlineParams.alpha = 0.5f
+        windowManager.updateViewLayout(viewTarget, outlineParams)
+    }
+
+
+    fun hasInData(mutableList: MutableList<AccessibilityData>,accessibilityData: AccessibilityData):AccessibilityData{
+        for (tmp in mutableList){
+            if (accessibilityData.id == tmp.id){
+                return tmp
+            }
+        }
+        return null
+    }
+
     public fun getPageName(application: Application){
         val rtis = (application.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getRunningTasks(1)
         tmpPkgName = rtis.get(0).topActivity!!.packageName
         tmpActivityName = rtis.get(0).topActivity!!.className
     }
 
-    public fun updateActivityAndPgName(pgName : String,activityName:String){
+    fun updateActivityAndPgName(pgName : String,activityName:String){
         tmpPkgName = pgName
         tvPackageName?.text = pgName
-        if (!activityName.isNullOrEmpty()){
+        if (!activityName.isNullOrEmpty() && tmpActivityName != activityName){
             tmpActivityName = activityName
             tvActivityName?.text = activityName
+//            updateNodeListView()
         }
     }
 
@@ -381,6 +509,29 @@ class AccessibilityUtil private constructor(){
             findAllNode(childrenList, list, "$indent  ")
         }
     }
+
+//    /**
+//     * 查找出所有可以操作点击的控件
+//     */
+//    open fun findCanClickNode(roots: List<AccessibilityNodeInfo>,
+//                              list: MutableList<AccessibilityNodeInfo>,
+//                              indent: String){
+//
+//        val childrenList = ArrayList<AccessibilityNodeInfo>()
+//        for (e in roots) {
+//            if (e == null) continue
+//            list.add(e)
+//            logD(TAG,describeAccessibilityNode(e))
+//            for (n in 0 until e.childCount) {
+//                if (e.getChild(n).isClickable){
+//                    childrenList.add(e.getChild(n))
+//                }
+//            }
+//        }
+//        if (childrenList.isNotEmpty()) {
+//            findCanClickNode(childrenList, list, "$indent  ")
+//        }
+//    }
 
     open fun describeAccessibilityNode(e: AccessibilityNodeInfo?): String {
         if (e == null) {
