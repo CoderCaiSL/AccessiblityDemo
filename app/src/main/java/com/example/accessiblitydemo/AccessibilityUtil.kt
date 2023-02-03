@@ -230,7 +230,11 @@ class AccessibilityUtil private constructor(){
                                         (cId?.toString()
                                     ?: "null") + " " + "desc:" + (cDesc?.toString()
                                     ?: "null") + " " + "text:" + (cText?.toString() ?: "null")
+                            launchWithExpHandler {
+                                nodeInfoClick(e)
+                            }
                             v.setBackgroundResource(R.drawable.node_focus)
+
                         } else {
                             v.setBackgroundResource(R.drawable.node)
                         }
@@ -391,16 +395,8 @@ class AccessibilityUtil private constructor(){
             }else{
                 img.setBackgroundResource(R.drawable.node)
             }
-            img.onFocusChangeListener = View.OnFocusChangeListener { v, hasFocus ->
-                if (hasFocus) {
-                    v.setBackgroundResource(R.drawable.node_focus)
-                } else {
-                    v.setBackgroundResource(R.drawable.node)
-                }
-            }
             nodeMapImageView[info] = img
             layoutOverlayOutline.addView(img, params)
-
         }
         outlineParams.alpha = 0.5f
         windowManager.updateViewLayout(viewTarget, outlineParams)
