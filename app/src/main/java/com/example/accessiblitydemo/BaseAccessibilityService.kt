@@ -82,7 +82,6 @@ open class BaseAccessibilityService :AccessibilityService() , CoroutineScope by 
             setPackages.add(e.activityInfo.packageName)
         }
         // find all homes
-        // find all homes
         intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
         resolveInfoList = packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
         for (e in resolveInfoList) {
@@ -94,11 +93,6 @@ open class BaseAccessibilityService :AccessibilityService() , CoroutineScope by 
         for (e in inputMethodInfoList) {
             setIMEApps.add(e.packageName)
         }
-        // ignore some packages in hardcoded way
-        // https://support.google.com/a/answer/7292363?hl=en
-
-        // 从 pkgLaunchers 中删除白名单、系统、家庭和临时包
-
         setPackages.removeAll(setHomes)
         setPackages.removeAll(setIMEApps)
         setPackages.remove(packageName)
@@ -125,6 +119,7 @@ open class BaseAccessibilityService :AccessibilityService() , CoroutineScope by 
                             event.packageName.toString(),
                             event.className.toString()
                         )
+                        logD("响应脚本监听弹窗变化",event.eventType.toString()+"-----"+tmpActivityName)
                         logD(TAG, "类名：$tmpActivityName")
 //                        try {
 //                            var activityName = packageManager.getActivityInfo(componentName, 0).toString()
@@ -136,6 +131,12 @@ open class BaseAccessibilityService :AccessibilityService() , CoroutineScope by 
 //                        AccessibilityUtil.instant.tmpPkgName = tmpPkgName.toString()
 //                        AccessibilityUtil.instant.tmpClassName = tmpClassName.toString()
 //                        AccessibilityUtil.instant.tmpActivityName = tmpActivityName
+                    }
+                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ->{
+                        logD("响应脚本监听",event.eventType.toString()+"-----"+tmpActivityName)
+                    }
+                    AccessibilityEvent.TYPE_VIEW_SCROLLED ->{
+                        logD("响应脚本监听滚动","id:"+event.eventType.toString()+"-----"+tmpActivityName)
                     }
                 }
                 onCustomEvent(event)

@@ -11,6 +11,7 @@ import android.util.DisplayMetrics
 import android.view.*
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.*
+import kotlinx.coroutines.delay
 import java.lang.ref.WeakReference
 import java.util.*
 import kotlin.collections.HashMap
@@ -22,6 +23,7 @@ import kotlin.concurrent.timerTask
  */
 class AccessibilityUtil private constructor(){
 
+    private var oldActivityName: String = ""
     private lateinit var viewTarget: View
     private lateinit var windowManager: WindowManager
     private lateinit var tvWidgetInfo: TextView
@@ -44,7 +46,7 @@ class AccessibilityUtil private constructor(){
     var clickHashMap : HashMap<String,MutableList<AccessibilityData>> = HashMap()
     private var usdTouch = false
     private var isRunning = false;
-    private val mTimer = Timer() // 计时器
+    private var mTimer : Timer ?= null  // 计时器
 
 
     init {
@@ -177,7 +179,7 @@ class AccessibilityUtil private constructor(){
                         windowManager.updateViewLayout(imageTarget, targetParams)
                     }
                 }
-                return false
+                return true
             }
         })
         btShowOutline.setOnClickListener(View.OnClickListener { v ->
@@ -213,29 +215,26 @@ class AccessibilityUtil private constructor(){
                     }
                     val img = ImageView(weakService?.get())
                     img.setBackgroundResource(R.drawable.node)
-//                    img.isFocusableInTouchMode = true
-//                    img.setOnClickListener { v -> v.requestFocus() }
-//                    img.onFocusChangeListener = View.OnFocusChangeListener { v, hasFocus ->
-//                        if (hasFocus) {
-//                            val cId: CharSequence? = e.viewIdResourceName
-//                            val cDesc = e.contentDescription
-//                            val cText = e.text
-//                            btAddWidget.isEnabled = true
-//                            tvPackageName!!.text = tmpPkgName+"("+e.className+")"
-//                            tvActivityName!!.text = tmpActivityName
-//                            tvWidgetInfo.text =
-//                                "click:" + (if (e.isClickable) "true" else "false") + " " + "bonus:" + temRect.toShortString() + " " + "id:" +
-//                                        (cId?.toString()
-//                                    ?: "null") + " " + "desc:" + (cDesc?.toString()
-//                                    ?: "null") + " " + "text:" + (cText?.toString() ?: "null")
-//                            if (e.isClickable){
-//                                e.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-//                            }
-//                            v.setBackgroundResource(R.drawable.node_focus)
-//                        } else {
-//                            v.setBackgroundResource(R.drawable.node)
-//                        }
-//                    }
+                    img.isFocusableInTouchMode = true
+                    img.setOnClickListener { v -> v.requestFocus() }
+                    img.onFocusChangeListener = View.OnFocusChangeListener { v, hasFocus ->
+                        if (hasFocus) {
+                            val cId: CharSequence? = e.viewIdResourceName
+                            val cDesc = e.contentDescription
+                            val cText = e.text
+                            btAddWidget.isEnabled = true
+                            tvPackageName!!.text = tmpPkgName+"("+e.className+")"
+                            tvActivityName!!.text = tmpActivityName
+                            tvWidgetInfo.text =
+                                "click:" + (if (e.isClickable) "true" else "false") + " " + "bonus:" + temRect.toShortString() + " " + "id:" +
+                                        (cId?.toString()
+                                    ?: "null") + " " + "desc:" + (cDesc?.toString()
+                                    ?: "null") + " " + "text:" + (cText?.toString() ?: "null")
+                            v.setBackgroundResource(R.drawable.node_focus)
+                        } else {
+                            v.setBackgroundResource(R.drawable.node)
+                        }
+                    }
                     layoutOverlayOutline.addView(img, params)
                 }
                 outlineParams.alpha = 0.5f
@@ -293,14 +292,12 @@ class AccessibilityUtil private constructor(){
         btDumpScreen.setOnClickListener(View.OnClickListener {
             isRunning = !isRunning
             if (isRunning){
-                mTimer.schedule(timerTask {
-                    MainThreadHandler.runOnUiThread {
-                        updateNodeListView()
-                    }
-                },0,1500)
+                updateNodeListView()
                 btDumpScreen.text = "停止脚本"
             }else{
-                mTimer.cancel()
+                mTimer?.cancel()
+                mTimer?.purge()
+                mTimer = null
                 btDumpScreen.text = "开始脚本"
             }
 //            val root: AccessibilityNodeInfo =
@@ -331,19 +328,9 @@ class AccessibilityUtil private constructor(){
         windowManager.addView(imageTarget, targetParams)
     }
 
-    fun runAction(nodeInfo: AccessibilityNodeInfo):Boolean{
-        if (nodeInfo.isClickable && nodeInfo.isVisibleToUser){
-           return nodeInfo.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        }else{
-            return false
-        }
-    }
-
-
     /**
      * 视图变动的时候更新一次UI脚本，防止脚本获取控件的信息延迟导致脚本执行异常
      */
-    @Synchronized
     fun updateNodeListView(){
         val root: AccessibilityNodeInfo =
             weakService?.get()?.rootInActiveWindow ?: return
@@ -362,9 +349,11 @@ class AccessibilityUtil private constructor(){
         nodeMapImageView.clear()
         usdTouch = false
         var pageClickNodeInfoList : MutableList<AccessibilityData>? = clickHashMap[tmpActivityName]
+        //Activity
         if (pageClickNodeInfoList == null){
             pageClickNodeInfoList = mutableListOf()
         }
+        logD("脚本执行：当前名称",tmpActivityName+"数量："+pageClickNodeInfoList.size);
         for (e in nodeList) {
             val temRect = Rect()
             if (!e.isVisibleToUser){
@@ -390,7 +379,6 @@ class AccessibilityUtil private constructor(){
                     (cId?.toString()
                         ?: "null") + " " + "desc:" + (cDesc?.toString()
                 ?: "null") + " " + "text:" + (cText?.toString() ?: "null")
-            nodeMapImageView[info] = img
             logD("脚本执行日志:","$info")
             val tmpData = AccessibilityData(info,false,tmpActivityName,e)
             var tp = hasInData(pageClickNodeInfoList,tmpData)
@@ -398,44 +386,107 @@ class AccessibilityUtil private constructor(){
                 pageClickNodeInfoList.add(tmpData)
                 tp = tmpData
             }
-            if (!tp.state){
+            if (tp.state){
                 img.setBackgroundResource(R.drawable.node_focus)
             }else{
                 img.setBackgroundResource(R.drawable.node)
             }
             img.onFocusChangeListener = View.OnFocusChangeListener { v, hasFocus ->
                 if (hasFocus) {
-
                     v.setBackgroundResource(R.drawable.node_focus)
                 } else {
                     v.setBackgroundResource(R.drawable.node)
                 }
             }
+            nodeMapImageView[info] = img
             layoutOverlayOutline.addView(img, params)
 
         }
-        if (isRunning){
-            if("com.jin10" != tmpPkgName){
-                WatchingAccessibilityService.sInstance!!.performGlobalAction(
-                    AccessibilityService.GLOBAL_ACTION_BACK)
-                return
-            }
-            var noRun = false
-            for (tmp in pageClickNodeInfoList){
-
-            }
-            if (!noRun){
-                WatchingAccessibilityService.sInstance!!.performGlobalAction(
-                    AccessibilityService.GLOBAL_ACTION_BACK)
-                updateNodeListView()
-            }
-        }
         outlineParams.alpha = 0.5f
         windowManager.updateViewLayout(viewTarget, outlineParams)
+        if (isRunning){
+            if("com.jin10" != tmpPkgName){
+//                WatchingAccessibilityService.sInstance!!.performGlobalAction(
+//                    AccessibilityService.GLOBAL_ACTION_BACK)
+            }else{
+                var hasRun = false
+                pageClickNodeInfoList?.let {
+                    for (tmp in it){
+                        if (!tmp.state && tmp.accessibilityNodeInfo.isVisibleToUser){
+                            launchWithExpHandler {
+                                nodeInfoClick(tmp.accessibilityNodeInfo)
+                            }
+                            isRobClick = true
+                            tmp.state = true
+                            val runImageView = nodeMapImageView[tmp.id]
+                            runImageView?.let { imageView ->
+                                imageView.setBackgroundResource(R.drawable.node_focus_click)
+                                logD("脚本执行：","活动名称："+tmpActivityName+"--内容："+tmp.id)
+                            }
+                            hasRun = true
+                            break
+                        }
+                    }
+                }
+                clickHashMap[tmpActivityName] = pageClickNodeInfoList
+                if (!hasRun){
+                    activityListSc[tmpActivityName] = true
+                    //当前界面焦点全部执行完毕，提取当前图层的所有下一级的焦点跳转，进行跳转处理，如果当前层级结束，则退出
+//                    for(nextANodeInfo in nextActivityNodeInfoHashMap.entries){
+//                        var hasRun = false
+//                        for (asc in activityListSc){
+//                            if (nextANodeInfo.key != asc.key){
+//                                hasRun = true
+//                                break
+//                            }
+//                        }
+//                        if (!hasRun){
+//                            //找到没有执行完的层级，进行跳转处理，并从队列中移除出去
+//                            nodeInfoClick(nextANodeInfo.value)
+//                        }
+//                    }
+                    logD("脚本执行：","该界面全部焦点执行完毕")
+                    backActivity()
+                }
+            }
+        }
+    }
+
+    suspend fun nodeInfoClick(nodeInfo: AccessibilityNodeInfo){
+        removeTimer()
+        if (mTimer == null){
+            mTimer = Timer()
+            mTimer?.schedule(timerTask {
+                MainThreadHandler.runOnUiThread {
+                    updateNodeListView()
+                }
+            },0,1500)
+        }
+        delay(500)
+        isRobClick = true
+        oldAccessibilityNodeInfo = nodeInfo
+        nodeInfo.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }
+
+    fun removeTimer(){
+        if (mTimer!=null){
+            mTimer?.cancel()
+            mTimer?.purge()
+            mTimer = null
+        }
+    }
+
+    fun backActivity(){
+        if (!tmpActivityName.contains("MainActivity")){
+            WatchingAccessibilityService.sInstance!!.performGlobalAction(
+                AccessibilityService.GLOBAL_ACTION_BACK)
+            isRobClick = true
+//            updateNodeListView()
+        }
     }
 
 
-    fun hasInData(mutableList: MutableList<AccessibilityData>,accessibilityData: AccessibilityData):AccessibilityData{
+    fun hasInData(mutableList: MutableList<AccessibilityData>,accessibilityData: AccessibilityData):AccessibilityData?{
         for (tmp in mutableList){
             if (accessibilityData.id == tmp.id){
                 return tmp
@@ -456,9 +507,35 @@ class AccessibilityUtil private constructor(){
         if (!activityName.isNullOrEmpty() && tmpActivityName != activityName){
             tmpActivityName = activityName
             tvActivityName?.text = activityName
-//            updateNodeListView()
         }
+        //增加下一个界面的焦点操作记录，层级界面执行完成进行下一级递进
+        if (oldActivityName != tmpActivityName && isRobClick && "com.jin10" == tmpPkgName){
+            oldAccessibilityNodeInfo?.let {
+                if (activityListSc[oldActivityName] == null){
+                    //上级没有执行完成，进行操作焦点保存
+                    nextActivityNodeInfoHashMap[tmpActivityName] = it
+                    backActivity()
+                }
+                removeTimer()
+                updateNodeListView()
+            }
+            isRobClick = false
+        }
+        if (isRunning){
+            if ("com.jin10" != tmpPkgName){
+                backActivity()
+            }
+        }
+        oldActivityName = tmpActivityName
     }
+
+
+
+    var isRobClick = false
+    var oldAccessibilityNodeInfo : AccessibilityNodeInfo? = null
+    var activityListSc : HashMap<String,Boolean> = HashMap()
+    //下一层级数据响应的焦点，一般来说随机第一个焦点触发的进行保留
+    var nextActivityNodeInfoHashMap : HashMap<String,AccessibilityNodeInfo> = HashMap()
 
 
     private fun dumpRootNode(root: AccessibilityNodeInfo): String {
@@ -509,29 +586,6 @@ class AccessibilityUtil private constructor(){
             findAllNode(childrenList, list, "$indent  ")
         }
     }
-
-//    /**
-//     * 查找出所有可以操作点击的控件
-//     */
-//    open fun findCanClickNode(roots: List<AccessibilityNodeInfo>,
-//                              list: MutableList<AccessibilityNodeInfo>,
-//                              indent: String){
-//
-//        val childrenList = ArrayList<AccessibilityNodeInfo>()
-//        for (e in roots) {
-//            if (e == null) continue
-//            list.add(e)
-//            logD(TAG,describeAccessibilityNode(e))
-//            for (n in 0 until e.childCount) {
-//                if (e.getChild(n).isClickable){
-//                    childrenList.add(e.getChild(n))
-//                }
-//            }
-//        }
-//        if (childrenList.isNotEmpty()) {
-//            findCanClickNode(childrenList, list, "$indent  ")
-//        }
-//    }
 
     open fun describeAccessibilityNode(e: AccessibilityNodeInfo?): String {
         if (e == null) {

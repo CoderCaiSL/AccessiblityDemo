@@ -1,7 +1,5 @@
 package com.example.accessiblitydemo
 
-import android.accessibilityservice.AccessibilityService
-import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,6 +10,7 @@ import android.graphics.Color
 import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.delay
 
 /**
  * @author: CaiSongL
@@ -76,6 +75,10 @@ public class WatchingAccessibilityService  : BaseAccessibilityService() {
         sendBroadcast(Intent(QuickSettingTileService.ACTION_UPDATE_TITLE))
         super.onServiceConnected()
         AccessibilityUtil.instant.showActivityCustomizationDialog(application)
+    }
+
+    suspend fun runAction(){
+        delay(200)
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
